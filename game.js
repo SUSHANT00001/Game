@@ -8,12 +8,14 @@ const INITIAL_STAR_SPEED = 2;
 const SPEED_INCREASE_INTERVAL = 15000; // 15 seconds
 const CATCH_ANIMATION_DURATION = 200; // Duration of catch animation in ms
 const BASKET_SPEED = 12; // Increased base speed
-const PARTICLE_COUNT = 10; // Number of particles per catch
+const PARTICLE_COUNT = 15; // Number of particles per catch
 const ACCELERATION = 2.5; // Increased acceleration rate
 const DECELERATION = 0.2; // Reduced deceleration for smoother movement
 const MAX_SPEED = 25; // Increased maximum speed
 const EASING = 0.15; // Increased easing for more responsive movement
 const WINNING_SCORE = 200; // Score needed to win
+const COMBO_THRESHOLD = 3; // Number of stars needed for a combo
+const COMBO_DURATION = 2000; // Combo duration in milliseconds
 
 // Game state
 let canvas, ctx;
@@ -23,7 +25,8 @@ let basket = {
     catchAnimation: 0, 
     velocity: 0,
     targetX: 0,
-    scale: 1 
+    scale: 1,
+    trail: [] // Array to store trail positions
 };
 let stars = [];
 let particles = [];
@@ -38,11 +41,53 @@ let dragOffset = 0;
 let lastTime = 0;
 let canvasScale = 1;
 let difficultyLevel = 1;
+let comboCount = 0;
+let lastCatchTime = 0;
+let backgroundStars = []; // Background stars for parallax effect
+
+// Initialize background stars
+function initBackgroundStars() {
+    for (let i = 0; i < 50; i++) {
+        backgroundStars.push({
+            x: Math.random() * CANVAS_WIDTH,
+            y: Math.random() * CANVAS_HEIGHT,
+            size: Math.random() * 2 + 1,
+            speed: Math.random() * 0.5 + 0.1
+        });
+    }
+}
+
+// Draw background with parallax effect
+function drawBackground() {
+    // Draw gradient background
+    const gradient = ctx.createLinearGradient(0, 0, 0, CANVAS_HEIGHT);
+    gradient.addColorStop(0, '#000033');
+    gradient.addColorStop(1, '#000066');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+    // Draw and update background stars
+    backgroundStars.forEach(star => {
+        star.y += star.speed;
+        if (star.y > CANVAS_HEIGHT) {
+            star.y = 0;
+            star.x = Math.random() * CANVAS_WIDTH;
+        }
+        
+        ctx.beginPath();
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+        ctx.arc(star.x, star.y, star.size, 0, Math.PI * 2);
+        ctx.fill();
+    });
+}
 
 // Initialize game
 function init() {
     canvas = document.getElementById('gameCanvas');
     ctx = canvas.getContext('2d');
+    
+    // Initialize background stars
+    initBackgroundStars();
     
     // Create restart button
     createRestartButton();
@@ -219,6 +264,9 @@ function gameLoop(timestamp) {
     // Clear canvas
     ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
+    // Draw background
+    drawBackground();
+
     // Update star speed based on time
     const elapsedTime = Date.now() - gameStartTime;
     const newDifficultyLevel = Math.floor(elapsedTime / SPEED_INCREASE_INTERVAL) + 1;
@@ -232,8 +280,9 @@ function gameLoop(timestamp) {
         }
     }
 
-    // Update basket position with smooth movement
+    // Update basket position and trail
     updateBasketPosition();
+    updateBasketTrail();
 
     // Spawn new stars randomly
     if (Math.random() < 0.02) {
@@ -380,6 +429,19 @@ function drawStar(x, y) {
 function drawBasket() {
     ctx.save();
     
+    // Draw basket trail
+    if (basket.trail.length > 0) {
+        ctx.beginPath();
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+        ctx.lineWidth = 2;
+        ctx.moveTo(basket.trail[0].x + BASKET_WIDTH/2, basket.trail[0].y + BASKET_HEIGHT/2);
+        
+        for (let i = 1; i < basket.trail.length; i++) {
+            ctx.lineTo(basket.trail[i].x + BASKET_WIDTH/2, basket.trail[i].y + BASKET_HEIGHT/2);
+        }
+        ctx.stroke();
+    }
+    
     // Apply catch animation
     if (basket.catchAnimation > 0) {
         const progress = basket.catchAnimation / CATCH_ANIMATION_DURATION;
@@ -390,19 +452,24 @@ function drawBasket() {
         basket.catchAnimation -= 16;
     }
 
-    // Add slight tilt based on movement
+    // Add tilt based on movement
     const tilt = basket.velocity * 0.02;
     ctx.translate(basket.x + BASKET_WIDTH/2, basket.y + BASKET_HEIGHT/2);
     ctx.rotate(tilt);
     ctx.translate(-(basket.x + BASKET_WIDTH/2), -(basket.y + BASKET_HEIGHT/2));
 
-    // Draw bucket body with gradient
+    // Draw bucket with enhanced effects
     const gradient = ctx.createLinearGradient(
         basket.x, basket.y,
         basket.x, basket.y + BASKET_HEIGHT
     );
     gradient.addColorStop(0, '#8B4513');
     gradient.addColorStop(1, '#654321');
+    
+    // Add glow effect
+    ctx.shadowColor = 'rgba(255, 255, 0, 0.3)';
+    ctx.shadowBlur = 15;
+    ctx.shadowOffsetY = 0;
     
     ctx.fillStyle = gradient;
     ctx.beginPath();
@@ -421,35 +488,44 @@ function drawBasket() {
     ctx.lineTo(basket.x + BASKET_WIDTH, basket.y);
     ctx.stroke();
 
-    // Draw bucket handle with shadow
+    // Draw bucket handle with enhanced shadow
     ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
     ctx.shadowBlur = 5;
     ctx.shadowOffsetY = 2;
     ctx.beginPath();
     ctx.arc(basket.x + BASKET_WIDTH/2, basket.y - 10, 15, Math.PI, 0);
     ctx.stroke();
-    ctx.shadowColor = 'transparent';
 
     ctx.restore();
 }
 
-// Create particles for catch effect
+// Update basket trail
+function updateBasketTrail() {
+    basket.trail.push({ x: basket.x, y: basket.y });
+    if (basket.trail.length > 10) {
+        basket.trail.shift();
+    }
+}
+
+// Create particles with enhanced effects
 function createParticles(x, y) {
+    const colors = ['#FFD700', '#FFA500', '#FF4500', '#FF6347'];
     for (let i = 0; i < PARTICLE_COUNT; i++) {
         const angle = (Math.PI * 2 * i) / PARTICLE_COUNT;
-        const speed = 2 + Math.random() * 2;
+        const speed = 2 + Math.random() * 3;
         particles.push({
             x: x,
             y: y,
             vx: Math.cos(angle) * speed,
             vy: Math.sin(angle) * speed,
             life: 1,
-            color: `hsl(${Math.random() * 60 + 30}, 100%, 50%)` // Yellow to orange
+            color: colors[Math.floor(Math.random() * colors.length)],
+            size: Math.random() * 4 + 2
         });
     }
 }
 
-// Update and draw particles
+// Update and draw particles with enhanced effects
 function updateParticles() {
     for (let i = particles.length - 1; i >= 0; i--) {
         const p = particles[i];
@@ -466,9 +542,12 @@ function updateParticles() {
         ctx.beginPath();
         ctx.fillStyle = p.color;
         ctx.globalAlpha = p.life;
-        ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
+        ctx.shadowColor = p.color;
+        ctx.shadowBlur = 10;
+        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
         ctx.fill();
         ctx.globalAlpha = 1;
+        ctx.shadowBlur = 0;
     }
 }
 
